@@ -15,6 +15,7 @@ load_dotenv()
 # Configuration
 N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "")
 APP_TITLE = os.getenv("APP_TITLE", "🦆 Patito Viajes")
+REQUEST_TIMEOUT = 120  # 2 minute timeout for n8n workflow processing
 
 # Page configuration
 st.set_page_config(
@@ -133,7 +134,7 @@ def send_travel_request(origin: str, destination: str, departure_date: str, retu
             N8N_WEBHOOK_URL,
             json=payload,
             headers={"Content-Type": "application/json"},
-            timeout=120  # 2 minute timeout for processing
+            timeout=REQUEST_TIMEOUT
         )
         response.raise_for_status()
         return response.json()
@@ -298,7 +299,7 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style="text-align: center; color: #666; padding: 1rem;">
-        <p>Made with ❤️ by <a href="https://github.com/tecncr" target="_blank">tecncr</a></p>
+        <p>Made with ❤️ by <a href="https://github.com/tecncr" target="_blank" rel="noopener noreferrer">tecncr</a></p>
         <p style="font-size: 0.8rem;">
             🦆 Patito Viajes uses SerpAPI for real-time travel data and Google Gemini for AI-powered summaries.
         </p>

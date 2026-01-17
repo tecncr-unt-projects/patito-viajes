@@ -149,7 +149,7 @@ cd patito-viajes
    
    Edita `.env` y agrega:
    ```
-   N8N_WEBHOOK_URL=tu_url_webhook_n8n
+   N8N_WEBHOOK_URL=https://tu-instancia-de-n8n.com/webhook/patito-viajes
    SERPAPI_KEY=tu_clave_serpapi
    ```
 
@@ -180,10 +180,10 @@ El archivo `.env` controla la configuración de la aplicación Streamlit:
 
 ```env
 # Configuración de n8n
-N8N_WEBHOOK_URL=https://tu-instancia-n8n.com/webhook/patito-viajes
+N8N_WEBHOOK_URL=https://tu-instancia-de-n8n.com/webhook/patito-viajes
 
 # Configuración de SerpAPI (si se llama directamente)
-SERPAPI_KEY=tu_clave_api_serpapi
+SERPAPI_KEY=tu_clave_serpapi
 
 # Configuración de la Aplicación
 APP_TITLE=Patito Viajes

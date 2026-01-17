@@ -1,0 +1,296 @@
+{
+  "name": "Patito Viajes - Travel Search Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "patito-viajes",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "patito-viajes-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate and extract input parameters\nconst body = $input.first().json.body;\n\nconst origin = body.origin;\nconst destination = body.destination;\nconst departureDate = body.departure_date;\nconst returnDate = body.return_date || null;\n\n// Validate required fields\nif (!origin || !destination || !departureDate) {\n  throw new Error('Missing required fields: origin, destination, and departure_date are required');\n}\n\n// Validate date format (YYYY-MM-DD)\nconst dateRegex = /^\\d{4}-\\d{2}-\\d{2}$/;\nif (!dateRegex.test(departureDate)) {\n  throw new Error('Invalid departure_date format. Use YYYY-MM-DD');\n}\n\nif (returnDate && !dateRegex.test(returnDate)) {\n  throw new Error('Invalid return_date format. Use YYYY-MM-DD');\n}\n\nreturn {\n  origin: origin,\n  destination: destination,\n  departure_date: departureDate,\n  return_date: returnDate,\n  is_round_trip: returnDate !== null\n};"
+      },
+      "id": "code-validate",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "engine": "google_flights",
+        "departure_id": "={{ $json.origin }}",
+        "arrival_id": "={{ $json.destination }}",
+        "outbound_date": "={{ $json.departure_date }}",
+        "return_date": "={{ $json.return_date }}",
+        "type": "={{ $json.is_round_trip ? '1' : '2' }}",
+        "currency": "USD",
+        "hl": "en"
+      },
+      "id": "serpapi-flights",
+      "name": "SerpAPI - Google Flights",
+      "type": "n8n-nodes-base.serpApi",
+      "typeVersion": 1,
+      "position": [700, 150],
+      "credentials": {
+        "serpApi": {
+          "id": "serpapi-credentials",
+          "name": "SerpAPI Patito Viajes"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "engine": "google_hotels",
+        "q": "={{ $json.destination }} hotels",
+        "check_in_date": "={{ $json.departure_date }}",
+        "check_out_date": "={{ $json.return_date || $json.departure_date }}",
+        "currency": "USD",
+        "hl": "en"
+      },
+      "id": "serpapi-hotels",
+      "name": "SerpAPI - Google Hotels",
+      "type": "n8n-nodes-base.serpApi",
+      "typeVersion": 1,
+      "position": [700, 300],
+      "credentials": {
+        "serpApi": {
+          "id": "serpapi-credentials",
+          "name": "SerpAPI Patito Viajes"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "engine": "google",
+        "q": "={{ 'Best things to do and attractions in ' + $json.destination }}",
+        "google_domain": "google.com",
+        "hl": "en"
+      },
+      "id": "serpapi-activities",
+      "name": "SerpAPI - Activities (AI Mode)",
+      "type": "n8n-nodes-base.serpApi",
+      "typeVersion": 1,
+      "position": [700, 450],
+      "credentials": {
+        "serpApi": {
+          "id": "serpapi-credentials",
+          "name": "SerpAPI Patito Viajes"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate results from all SerpAPI calls\nconst items = $input.all();\n\nlet flightsData = {};\nlet hotelsData = {};\nlet activitiesData = {};\n\n// Process each item based on its source\nfor (const item of items) {\n  const json = item.json;\n  \n  if (json.best_flights || json.other_flights) {\n    flightsData = json;\n  } else if (json.properties) {\n    hotelsData = json;\n  } else if (json.organic_results || json.ai_overview) {\n    activitiesData = json;\n  }\n}\n\n// Get the original search parameters from the first item's context\nconst searchParams = {\n  origin: items[0]?.json?.search_parameters?.departure_id || 'Unknown',\n  destination: items[0]?.json?.search_parameters?.arrival_id || 'Unknown',\n  departure_date: items[0]?.json?.search_parameters?.outbound_date || 'Unknown',\n  return_date: items[0]?.json?.search_parameters?.return_date || null\n};\n\nreturn {\n  search_params: searchParams,\n  flights: flightsData,\n  hotels: hotelsData,\n  activities: activitiesData\n};"
+      },
+      "id": "code-aggregate",
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [950, 300]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "models/gemini-1.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are a professional travel assistant helping users plan their trips. Based on the following travel data, create a comprehensive, well-formatted Markdown summary.\n\n## Search Parameters:\n- Origin: {{ $json.search_params.origin }}\n- Destination: {{ $json.search_params.destination }}\n- Departure Date: {{ $json.search_params.departure_date }}\n{{ $json.search_params.return_date ? '- Return Date: ' + $json.search_params.return_date : '- Trip Type: One-way' }}\n\n## Flight Data:\n{{ JSON.stringify($json.flights, null, 2) }}\n\n## Hotel Data:\n{{ JSON.stringify($json.hotels, null, 2) }}\n\n## Activities & Attractions:\n{{ JSON.stringify($json.activities, null, 2) }}\n\n---\n\nPlease create a comprehensive travel summary in Markdown format including:\n\n1. **✈️ Flight Options** - Top 3-5 recommended flights with prices, airlines, duration, and stops. Include both best value and fastest options if available.\n\n2. **🏨 Accommodation Recommendations** - Top 3-5 hotels with ratings, prices per night, and key amenities. Categorize by budget, mid-range, and luxury if possible.\n\n3. **🎯 Things to Do** - Top 5-10 recommended activities and attractions at the destination. Include a mix of cultural sites, outdoor activities, dining, and entertainment.\n\n4. **💰 Estimated Budget Summary** - A rough estimate of total trip costs including flights, accommodation (per night), and activities.\n\n5. **📝 Travel Tips** - Any relevant tips for the destination based on the travel dates.\n\nMake the response engaging, informative, and easy to read. Use emojis appropriately to make it visually appealing. If any data is unavailable, mention that the information could not be retrieved and suggest alternatives."
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.7,
+          "maxOutputTokens": 4096
+        }
+      },
+      "id": "gemini-summarize",
+      "name": "Gemini - Summarize Results",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [1150, 300],
+      "credentials": {
+        "googleGeminiApi": {
+          "id": "gemini-credentials",
+          "name": "Google Gemini API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format the final response\nconst geminiResponse = $input.first().json;\n\n// Extract the markdown content from Gemini's response\nlet markdownContent = '';\n\nif (geminiResponse.text) {\n  markdownContent = geminiResponse.text;\n} else if (geminiResponse.message?.content) {\n  markdownContent = geminiResponse.message.content;\n} else if (typeof geminiResponse === 'string') {\n  markdownContent = geminiResponse;\n} else {\n  markdownContent = '# Travel Search Results\\n\\nUnable to generate summary. Please try again later.';\n}\n\nreturn {\n  success: true,\n  markdown: markdownContent,\n  generated_at: new Date().toISOString()\n};"
+      },
+      "id": "code-format-response",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1350, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1550, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, error: $json.message || 'An error occurred processing your request', markdown: null }) }}",
+        "options": {
+          "responseCode": 400,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond-error",
+      "name": "Respond Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [700, 600]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "SerpAPI - Google Flights",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "SerpAPI - Google Hotels",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "SerpAPI - Activities (AI Mode)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SerpAPI - Google Flights": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SerpAPI - Google Hotels": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SerpAPI - Activities (AI Mode)": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Results": {
+      "main": [
+        [
+          {
+            "node": "Gemini - Summarize Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini - Summarize Results": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "instanceId": "patito-viajes-instance"
+  },
+  "pinData": {},
+  "versionId": "1.0.0",
+  "triggerCount": 0
+}
